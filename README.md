@@ -11,7 +11,7 @@ Built on top of [moodle-docker](https://github.com/moodlehq/moodle-docker) by Mo
 [![Docker](https://img.shields.io/badge/Docker-required-2496ED?style=flat-square&logo=docker&logoColor=white)](https://docker.com)
 [![HTMX](https://img.shields.io/badge/HTMX-2.0-3D72D7?style=flat-square)](https://htmx.org)
 [![Vibe Coded](https://img.shields.io/badge/vibe%20coded-Claude%20Sonnet-blueviolet?style=flat-square)](https://anthropic.com)
-[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![License](https://img.shields.io/badge/license-AGPL--3.0-green?style=flat-square)](LICENSE)
 
 </div>
 
@@ -233,4 +233,4 @@ Requires `docker` CLI in PATH and access to the host Docker socket.
 
 ## License
 
-MIT — free for personal and commercial use.
+AGPL-3.0 — see [LICENSE](LICENSE) for details.
