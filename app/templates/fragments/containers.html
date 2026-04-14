@@ -1,0 +1,42 @@
+{% if containers %}
+<div class="overflow-hidden rounded-lg border border-slate-200">
+  <table class="min-w-full divide-y divide-slate-200">
+    <thead class="bg-slate-50">
+      <tr>
+        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Servicio</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Contenedor</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Estado</th>
+        <th class="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase tracking-wider">Puertos</th>
+      </tr>
+    </thead>
+    <tbody class="bg-white divide-y divide-slate-100">
+      {% for c in containers %}
+      <tr>
+        <td class="px-4 py-3 text-sm font-medium text-slate-800">{{ c.service }}</td>
+        <td class="px-4 py-3 text-sm text-slate-500 font-mono text-xs">{{ c.name }}</td>
+        <td class="px-4 py-3">
+          {% if c.status == 'running' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+              <span class="w-1.5 h-1.5 rounded-full bg-green-500"></span>running
+            </span>
+          {% elif c.status == 'exited' %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-700">
+              <span class="w-1.5 h-1.5 rounded-full bg-red-500"></span>exited
+            </span>
+          {% else %}
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-slate-100 text-slate-600">
+              <span class="w-1.5 h-1.5 rounded-full bg-slate-400"></span>{{ c.status }}
+            </span>
+          {% endif %}
+        </td>
+        <td class="px-4 py-3 text-xs text-slate-500 font-mono">{{ c.ports }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="text-center py-8 text-slate-400">
+  <p class="text-sm">No hay contenedores en ejecución para esta instancia.</p>
+</div>
+{% endif %}

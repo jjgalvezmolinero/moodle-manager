@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="es" class="h-full bg-slate-50">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Moodle Manager{% endblock %}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23818cf8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><path d='M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7'/></svg>">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://unpkg.com/htmx.org@2.0.3"></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.css">
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.js"></script>
+  <style>
+    [x-cloak] { display: none !important; }
+    .log-output { font-family: 'Courier New', Courier, monospace; }
+  </style>
+</head>
+<body class="h-full" x-data="{ toast: null }" @show-toast.window="toast = $event.detail; setTimeout(() => toast = null, 4000)">
+
+  <!-- Navbar -->
+  <nav class="bg-slate-900 shadow-lg">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-14">
+        <div class="flex items-center gap-3">
+          <a href="/" class="flex items-center gap-2 text-white font-semibold text-lg hover:text-indigo-300 transition-colors">
+            <svg class="w-6 h-6 text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                d="M5 12H3l9-9 9 9h-2M5 12v7a2 2 0 002 2h10a2 2 0 002-2v-7"/>
+            </svg>
+            Moodle Manager
+          </a>
+        </div>
+        <div class="flex items-center gap-2">
+          <a href="/settings"
+             class="px-3 py-1.5 text-slate-300 hover:text-white text-sm transition-colors">
+            Configuración
+          </a>
+          <a href="/instances/new"
+             class="inline-flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-md transition-colors">
+            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+            </svg>
+            Nueva instancia
+          </a>
+        </div>
+      </div>
+    </div>
+  </nav>
+
+  <!-- Toast notification -->
+  <div x-cloak x-show="toast" x-transition
+       class="fixed top-4 right-4 z-50 max-w-sm">
+    <div :class="toast?.ok ? 'bg-green-600' : 'bg-red-600'"
+         class="text-white px-4 py-3 rounded-lg shadow-lg flex items-start gap-3">
+      <svg x-show="toast?.ok" class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+      </svg>
+      <svg x-show="!toast?.ok" class="w-5 h-5 mt-0.5 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+      <p class="text-sm" x-text="toast?.message"></p>
+    </div>
+  </div>
+
+  <!-- Main content -->
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    {% block content %}{% endblock %}
+  </main>
+
+  <!-- Output modal (for action results) -->
+  <div id="output-modal" x-data="{ open: false, ok: true, output: '' }"
+       @open-output.window="open = true; ok = $event.detail.ok; output = $event.detail.output"
+       x-show="open" x-cloak
+       class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
+    <div @click.outside="open = false"
+         class="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+      <div class="flex items-center justify-between px-5 py-4 border-b">
+        <h3 class="font-semibold text-slate-800" :class="ok ? 'text-green-700' : 'text-red-700'"
+            x-text="ok ? 'Completado correctamente' : 'Error en la operación'"></h3>
+        <button @click="open = false" class="text-slate-400 hover:text-slate-600">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+      <div class="p-5 overflow-auto flex-1">
+        <pre class="log-output text-xs text-slate-700 bg-slate-50 p-4 rounded-lg whitespace-pre-wrap break-words" x-text="output || '(sin salida)'"></pre>
+      </div>
+      <div class="px-5 py-3 border-t flex justify-end">
+        <button @click="open = false" class="px-4 py-2 bg-slate-200 hover:bg-slate-300 text-slate-700 text-sm font-medium rounded-md">
+          Cerrar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // Global handler for compose/action API responses
+    function handleApiResponse(response, successMsg) {
+      response.json().then(data => {
+        if (data.redirect && data.ok) {
+          window.location.href = data.redirect;
+          return;
+        }
+        if (data.output) {
+          window.dispatchEvent(new CustomEvent('open-output', { detail: { ok: data.ok, output: data.output } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { ok: data.ok, message: data.ok ? successMsg : 'Error en la operación' } }));
+        }
+      });
+    }
+  </script>
+
+</body>
+</html>

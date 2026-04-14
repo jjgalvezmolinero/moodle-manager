@@ -1,0 +1,466 @@
+{% extends "base.html" %}
+{% block title %}{{ instance.name }} — Moodle Manager{% endblock %}
+{% set label, color = STATUS_LABELS[status] %}
+
+{% block content %}
+
+<script>
+document.addEventListener('alpine:init', () => {
+  Alpine.data('instancePage', () => ({
+    instanceId: '{{ instance.id }}',
+    activeTab: 'containers',
+
+    // Logs
+    logService: 'webserver',
+    logLines: [],
+    logRunning: false,
+    logSource: null,
+
+    // Terminal
+    termService: 'webserver',
+    termInstance: null,
+    termWs: null,
+
+    // Actions
+    actionLoading: '',
+
+    startLogs() {
+      if (this.logSource) this.logSource.close();
+      this.logLines = [];
+      this.logRunning = true;
+      this.logSource = new EventSource('/instances/' + this.instanceId + '/logs?service=' + this.logService);
+      this.logSource.onmessage = (e) => {
+        this.logLines.push(e.data);
+        if (this.logLines.length > 500) this.logLines.shift();
+        this.$nextTick(() => {
+          const el = document.getElementById('log-box');
+          if (el) el.scrollTop = el.scrollHeight;
+        });
+      };
+      this.logSource.onerror = () => { this.logRunning = false; };
+    },
+
+    stopLogs() {
+      if (this.logSource) { this.logSource.close(); this.logSource = null; }
+      this.logRunning = false;
+    },
+
+    startTerminal() {
+      if (this.termWs) this.termWs.close();
+      const el = document.getElementById('terminal-container');
+      if (!el) return;
+      el.innerHTML = '';
+      if (this.termInstance) { this.termInstance.dispose(); this.termInstance = null; }
+
+      const term = new Terminal({
+        cursorBlink: true,
+        fontSize: 13,
+        fontFamily: 'Courier New, monospace',
+        theme: { background: '#0f172a', foreground: '#e2e8f0', cursor: '#818cf8' },
+        scrollback: 2000,
+      });
+      const fitAddon = new FitAddon.FitAddon();
+      term.loadAddon(fitAddon);
+      term.open(el);
+      fitAddon.fit();
+      this.termInstance = term;
+
+      const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+      const ws = new WebSocket(proto + '://' + location.host + '/instances/' + this.instanceId + '/terminal?service=' + this.termService);
+      ws.binaryType = 'arraybuffer';
+      this.termWs = ws;
+
+      ws.onmessage = (e) => term.write(new Uint8Array(e.data));
+      ws.onclose  = () => term.write('\r\n\x1b[31m[Conexión cerrada]\x1b[0m\r\n');
+      ws.onerror  = () => term.write('\r\n\x1b[31m[Error de conexión]\x1b[0m\r\n');
+
+      term.onData((data) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(new TextEncoder().encode(data));
+      });
+      term.onResize(({ cols, rows }) => {
+        if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'resize', cols, rows }));
+      });
+
+      const ro = new ResizeObserver(() => fitAddon.fit());
+      ro.observe(el);
+    },
+
+    stopTerminal() {
+      if (this.termWs) { this.termWs.close(); this.termWs = null; }
+      if (this.termInstance) { this.termInstance.dispose(); this.termInstance = null; }
+    },
+
+    switchTab(tab) {
+      if (this.activeTab === 'logs' && tab !== 'logs') this.stopLogs();
+      if (this.activeTab === 'terminal' && tab !== 'terminal') this.stopTerminal();
+      this.activeTab = tab;
+      if (tab === 'logs') this.startLogs();
+      if (tab === 'terminal') this.$nextTick(() => this.startTerminal());
+    },
+
+    async doAction(action, successMsg, confirmMsg) {
+      if (confirmMsg && !confirm(confirmMsg)) return;
+      this.actionLoading = action;
+      try {
+        const resp = await fetch('/instances/' + this.instanceId + '/' + action, { method: 'POST' });
+        handleApiResponse(resp, successMsg);
+      } finally {
+        this.actionLoading = '';
+      }
+    },
+
+    async doMoodleAction(url, successMsg, body) {
+      this.actionLoading = url;
+      try {
+        const resp = await fetch(url, { method: 'POST', body: body || null });
+        const data = await resp.json();
+        window.dispatchEvent(new CustomEvent('open-output', { detail: { ok: data.ok, output: data.output } }));
+      } finally {
+        this.actionLoading = '';
+      }
+    },
+  }));
+});
+</script>
+
+<div x-data="instancePage()">
+
+  <!-- Header -->
+  <div class="flex items-start justify-between gap-4 mb-6">
+    <div>
+      <div class="flex items-center gap-2 text-sm text-slate-500 mb-1">
+        <a href="/" class="hover:text-indigo-600">Dashboard</a>
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+        <span>{{ instance.name }}</span>
+      </div>
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold text-slate-900">{{ instance.name }}</h1>
+        <span id="badge-{{ instance.id }}"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-white {{ color }}"
+              hx-get="/instances/{{ instance.id }}/status-badge"
+              hx-trigger="every 6s"
+              hx-swap="outerHTML">
+          <span class="w-1.5 h-1.5 rounded-full bg-white/70"></span>{{ label }}
+        </span>
+      </div>
+      <div class="flex items-center gap-3 mt-1.5">
+        <span class="text-sm text-slate-400 font-mono">{{ instance.compose_project_name }}</span>
+        <a href="{{ instance.web_url() }}" target="_blank"
+           class="text-sm text-indigo-600 hover:underline flex items-center gap-1">
+          {{ instance.web_url() }}
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <!-- Main action buttons -->
+    <div class="flex items-center gap-2 shrink-0">
+      <button @click="doAction('up', 'Instancia arrancada')"
+              :disabled="actionLoading === 'up'"
+              class="inline-flex items-center gap-1.5 px-3 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14.752 11.168l-3.197-2.132A1 1 0 0010 9.87v4.263a1 1 0 001.555.832l3.197-2.132a1 1 0 000-1.664z"/>
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Arrancar
+      </button>
+      <button @click="doAction('stop', 'Instancia detenida')"
+              :disabled="actionLoading === 'stop'"
+              class="inline-flex items-center gap-1.5 px-3 py-2 bg-yellow-500 hover:bg-yellow-400 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+        </svg>
+        Detener
+      </button>
+      <button @click="doAction('down', 'Contenedores destruidos', '¿Destruir todos los contenedores?')"
+              :disabled="actionLoading === 'down'"
+              class="inline-flex items-center gap-1.5 px-3 py-2 bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/>
+        </svg>
+        Destruir
+      </button>
+      <div class="w-px h-8 bg-slate-200 mx-1"></div>
+      <a href="/instances/{{ instance.id }}/edit"
+         class="p-2 text-slate-500 hover:text-slate-700 hover:bg-slate-100 rounded-lg transition-colors" title="Editar">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+        </svg>
+      </a>
+    </div>
+  </div>
+
+  <!-- Tabs -->
+  <div class="border-b border-slate-200 mb-5">
+    <nav class="flex gap-1 -mb-px">
+      {% for tab_id, tab_label in [('containers', 'Contenedores'), ('logs', 'Logs'), ('terminal', 'Terminal'), ('actions', 'Acciones Moodle'), ('config', 'Configuración')] %}
+      <button @click="switchTab('{{ tab_id }}')"
+              :class="activeTab === '{{ tab_id }}' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'"
+              class="px-4 py-2.5 border-b-2 text-sm font-medium transition-colors whitespace-nowrap">
+        {{ tab_label }}
+      </button>
+      {% endfor %}
+    </nav>
+  </div>
+
+  <!-- Tab: Contenedores -->
+  <div x-show="activeTab === 'containers'">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-slate-700">Contenedores activos</h2>
+      <button @click="doAction('restart', 'Instancia reiniciada')"
+              :disabled="actionLoading === 'restart'"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Reiniciar
+      </button>
+    </div>
+    <div id="containers-table"
+         hx-get="/instances/{{ instance.id }}/containers-fragment"
+         hx-trigger="every 8s"
+         hx-swap="innerHTML">
+      {% include "fragments/containers.html" %}
+    </div>
+  </div>
+
+  <!-- Tab: Logs -->
+  <div x-show="activeTab === 'logs'" x-cloak>
+    <div class="flex items-center gap-3 mb-3">
+      <select x-model="logService" @change="startLogs()"
+              class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="webserver">webserver</option>
+        <option value="db">db</option>
+        <option value="selenium">selenium</option>
+        <option value="mailpit">mailpit</option>
+      </select>
+      <button @click="startLogs()"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Reconectar
+      </button>
+      <button @click="logLines = []"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors">
+        Limpiar
+      </button>
+      <span x-show="logRunning" class="flex items-center gap-1.5 text-xs text-green-600">
+        <span class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></span> en vivo
+      </span>
+    </div>
+    <div id="log-box"
+         class="bg-slate-900 rounded-xl p-4 h-[500px] overflow-y-auto log-output text-xs leading-5">
+      <template x-for="(line, idx) in logLines" :key="idx">
+        <div class="text-green-300 whitespace-pre-wrap break-all" x-text="line"></div>
+      </template>
+      <div x-show="logLines.length === 0" class="text-slate-500 italic">Esperando logs...</div>
+    </div>
+  </div>
+
+  <!-- Tab: Terminal -->
+  <div x-show="activeTab === 'terminal'" x-cloak>
+    <div class="flex items-center gap-3 mb-3">
+      <select x-model="termService" @change="startTerminal()"
+              class="px-3 py-1.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+        <option value="webserver">webserver</option>
+        <option value="db">db</option>
+        <option value="mailpit">mailpit</option>
+        <option value="selenium">selenium</option>
+      </select>
+      <button @click="startTerminal()"
+              class="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium text-slate-600 hover:text-slate-800 bg-slate-100 hover:bg-slate-200 rounded-md transition-colors">
+        <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+        </svg>
+        Reconectar
+      </button>
+    </div>
+    <div id="terminal-container" class="rounded-xl overflow-hidden" style="height:500px;"></div>
+  </div>
+
+  <!-- Tab: Acciones Moodle -->
+  <div x-show="activeTab === 'actions'" x-cloak>
+    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+
+      <!-- Xdebug -->
+      {% if instance.xdebug %}
+      <div class="md:col-span-2 bg-white rounded-xl border border-indigo-200 shadow-sm p-5">
+        <div class="flex items-center gap-2 mb-1">
+          <span class="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
+          <h3 class="text-sm font-semibold text-slate-800">Xdebug</h3>
+        </div>
+        <p class="text-xs text-slate-400 mb-1">
+          La extensión <strong>no viene instalada</strong> en la imagen base de moodle-docker.
+          Instálala una vez por ciclo de vida del contenedor (se pierde al hacer <em>down</em>).
+        </p>
+        <p class="text-xs text-slate-400 mb-4">
+          {% set php_parts = instance.php_version.split('.') %}
+          {% set php_major = php_parts[0] | int %}
+          {% set php_minor = php_parts[1] | int if php_parts | length > 1 else 0 %}
+          {% if php_major >= 8 %}
+            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug (3.x)</code> —
+          {% elif php_major == 7 and php_minor >= 3 %}
+            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-3.1.6</code> —
+          {% elif php_major == 7 %}
+            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-2.9.8</code> (config <em>remote_*</em>) —
+          {% else %}
+            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-2.5.5</code> (config <em>remote_*</em>) —
+          {% endif %}
+          Modo: <code class="bg-slate-100 px-1 rounded">{{ instance.xdebug_mode }}</code> —
+          Host: <code class="bg-slate-100 px-1 rounded">{{ instance.xdebug_client_host }}:{{ instance.xdebug_port }}</code>
+        </p>
+        <div class="flex flex-wrap gap-2">
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/install-xdebug', 'Xdebug instalado y activado')"
+                  :disabled="actionLoading !== ''"
+                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Instalar Xdebug
+            <span class="text-indigo-200 text-xs ml-1">(~2 min)</span>
+          </button>
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/enable-xdebug', 'Xdebug activado')"
+                  :disabled="actionLoading !== ''"
+                  class="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Activar
+          </button>
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/disable-xdebug', 'Xdebug desactivado')"
+                  :disabled="actionLoading !== ''"
+                  class="px-4 py-2 bg-slate-500 hover:bg-slate-400 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Desactivar
+          </button>
+        </div>
+      </div>
+      {% endif %}
+
+
+      <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+        <h3 class="text-sm font-semibold text-slate-800 mb-1">Instalar base de datos</h3>
+        <p class="text-xs text-slate-400 mb-4">Ejecuta <code class="bg-slate-100 px-1 rounded">install_database.php</code> dentro del webserver.</p>
+        <form @submit.prevent="doMoodleAction('/instances/{{ instance.id }}/actions/install-db', 'BD instalada', new FormData($event.target))"
+              class="space-y-3">
+          <div class="grid grid-cols-2 gap-2">
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Admin user</label>
+              <input type="text" name="adminuser" value="admin" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Admin pass</label>
+              <input type="text" name="adminpass" value="Admin1234!" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Admin email</label>
+              <input type="text" name="adminemail" value="admin@example.com" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Idioma</label>
+              <input type="text" name="lang" value="es" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Nombre del sitio</label>
+              <input type="text" name="fullname" value="Moodle Dev" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+            <div>
+              <label class="block text-xs font-medium text-slate-600 mb-1">Nombre corto</label>
+              <input type="text" name="shortname" value="moodle" class="w-full px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-1 focus:ring-indigo-500">
+            </div>
+          </div>
+          <button type="submit" :disabled="actionLoading !== ''"
+                  class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Instalar BD
+          </button>
+        </form>
+      </div>
+
+      <div class="space-y-3">
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <h3 class="text-sm font-semibold text-slate-800 mb-1">Inicializar PHPUnit</h3>
+          <p class="text-xs text-slate-400 mb-3">Ejecuta <code class="bg-slate-100 px-1 rounded">phpunit/cli/init.php</code>.</p>
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/init-phpunit', 'PHPUnit inicializado')"
+                  :disabled="actionLoading !== ''"
+                  class="w-full py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Init PHPUnit
+          </button>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <h3 class="text-sm font-semibold text-slate-800 mb-1">Inicializar Behat</h3>
+          <p class="text-xs text-slate-400 mb-3">Ejecuta <code class="bg-slate-100 px-1 rounded">behat/cli/init.php</code>.</p>
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/init-behat', 'Behat inicializado')"
+                  :disabled="actionLoading !== ''"
+                  class="w-full py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Init Behat
+          </button>
+        </div>
+        <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
+          <h3 class="text-sm font-semibold text-slate-800 mb-1">Purgar cachés</h3>
+          <p class="text-xs text-slate-400 mb-3">Ejecuta <code class="bg-slate-100 px-1 rounded">purge_caches.php</code>.</p>
+          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/purge-caches', 'Cachés purgadas')"
+                  :disabled="actionLoading !== ''"
+                  class="w-full py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+            Purgar cachés
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tab: Configuración -->
+  <div x-show="activeTab === 'config'" x-cloak>
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <h2 class="text-sm font-semibold text-slate-700">Configuración actual</h2>
+        <div class="flex gap-2">
+          <a href="/instances/{{ instance.id }}/edit"
+             class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-indigo-600 hover:text-indigo-800 bg-indigo-50 hover:bg-indigo-100 rounded-md transition-colors">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/>
+            </svg>
+            Editar
+          </a>
+          <form method="post" action="/instances/{{ instance.id }}/delete"
+                onsubmit="return confirm('¿Eliminar la instancia {{ instance.name }}? Los contenedores NO se destruirán.')">
+            <button type="submit"
+                    class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-red-600 hover:text-red-800 bg-red-50 hover:bg-red-100 rounded-md transition-colors">
+              Eliminar instancia
+            </button>
+          </form>
+        </div>
+      </div>
+      <div class="divide-y divide-slate-100">
+        {% set cfg = [
+          ('Nombre', instance.name),
+          ('moodle-docker path', instance.moodle_docker_path),
+          ('COMPOSE_PROJECT_NAME', instance.compose_project_name),
+          ('MOODLE_DOCKER_WWWROOT', instance.wwwroot),
+          ('MOODLE_DOCKER_DB', instance.db),
+          ('MOODLE_DOCKER_PHP_VERSION', instance.php_version),
+          ('MOODLE_DOCKER_DB_VERSION', instance.db_version or '(por defecto)'),
+          ('MOODLE_DOCKER_WEB_PORT', instance.web_port),
+          ('MOODLE_DOCKER_WEB_HOST', instance.web_host),
+          ('MOODLE_DOCKER_DB_PORT', instance.db_port or '(no expuesto)'),
+          ('MOODLE_DOCKER_BROWSER', instance.browser),
+          ('Xdebug', 'Sí (' + instance.xdebug_mode + ')' if instance.xdebug else 'No'),
+          ('External services', 'Sí' if instance.phpunit_external_services else 'No'),
+          ('Creada', instance.created_at[:19].replace('T', ' ')),
+          ('Modificada', instance.updated_at[:19].replace('T', ' ')),
+        ] %}
+        {% for key, val in cfg %}
+        <div class="grid grid-cols-2 px-5 py-2.5">
+          <span class="text-xs font-medium text-slate-500">{{ key }}</span>
+          <span class="text-xs text-slate-800 font-mono break-all">{{ val }}</span>
+        </div>
+        {% endfor %}
+        {% if instance.notes %}
+        <div class="px-5 py-2.5">
+          <span class="text-xs font-medium text-slate-500 block mb-1">Notas</span>
+          <p class="text-xs text-slate-700">{{ instance.notes }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+</div>
+{% endblock %}

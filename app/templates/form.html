@@ -1,0 +1,337 @@
+{% extends "base.html" %}
+{% set is_edit = instance is not none %}
+{% block title %}{{ 'Editar' if is_edit else 'Nueva' }} instancia — Moodle Manager{% endblock %}
+
+{% block content %}
+<div class="max-w-3xl">
+  <!-- Breadcrumb -->
+  <div class="flex items-center gap-2 text-sm text-slate-500 mb-6">
+    <a href="/" class="hover:text-indigo-600">Dashboard</a>
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+    </svg>
+    {% if is_edit %}
+    <a href="/instances/{{ instance.id }}" class="hover:text-indigo-600">{{ instance.name }}</a>
+    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+    </svg>
+    <span>Editar</span>
+    {% else %}
+    <span>Nueva instancia</span>
+    {% endif %}
+  </div>
+
+  <h1 class="text-2xl font-bold text-slate-900 mb-6">
+    {{ 'Editar instancia' if is_edit else 'Nueva instancia' }}
+  </h1>
+
+  <form method="post" action="{{ '/instances/' + instance.id + '/edit' if is_edit else '/instances' }}"
+        class="space-y-6">
+
+    <!-- Sección: Identificación -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Identificación</h2>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            Nombre <span class="text-red-500">*</span>
+          </label>
+          <input type="text" name="name" required
+                 value="{{ instance.name if is_edit else '' }}"
+                 placeholder="Ej: Moodle 4.5 Desarrollo"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Nombre descriptivo para identificar la instancia.</p>
+        </div>
+
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            Ruta a moodle-docker <span class="text-red-500">*</span>
+          </label>
+          <input type="text" name="moodle_docker_path" required
+                 value="{{ instance.moodle_docker_path if is_edit else default_moodle_docker_path }}"
+                 placeholder="Ej: /home/usuario/moodle-docker"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Ruta absoluta al repositorio moodle-docker en el host.</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            COMPOSE_PROJECT_NAME <span class="text-red-500">*</span>
+          </label>
+          <input type="text" name="compose_project_name" required
+                 value="{{ instance.compose_project_name if is_edit else '' }}"
+                 placeholder="Ej: moodle45"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Prefijo único para los contenedores Docker.</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Notas</label>
+          <input type="text" name="notes"
+                 value="{{ instance.notes or '' if is_edit else '' }}"
+                 placeholder="Notas opcionales..."
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Sección: Moodle -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Moodle</h2>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        <div class="sm:col-span-2">
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            MOODLE_DOCKER_WWWROOT <span class="text-red-500">*</span>
+          </label>
+          <input type="text" name="wwwroot" required
+                 value="{{ instance.wwwroot if is_edit else '' }}"
+                 placeholder="Ej: /home/usuario/moodle"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Ruta al código fuente de Moodle.</p>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Versión PHP</label>
+          <select name="php_version"
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {% for v in php_versions %}
+            <option value="{{ v }}" {{ 'selected' if (is_edit and instance.php_version == v) or (not is_edit and v == '8.3') }}>{{ v }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Base de datos</label>
+          <select name="db" required
+                  class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            {% for db in db_types %}
+            <option value="{{ db }}" {{ 'selected' if is_edit and instance.db == db }}>{{ db }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Versión BD <span class="text-slate-400 font-normal">(opcional)</span></label>
+          <input type="text" name="db_version"
+                 value="{{ instance.db_version or '' if is_edit else '' }}"
+                 placeholder="Ej: 16 (pgsql), 10.11 (mariadb)"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Puerto BD <span class="text-slate-400 font-normal">(opcional)</span></label>
+          <input type="text" name="db_port"
+                 value="{{ instance.db_port or '' if is_edit else '' }}"
+                 placeholder="Ej: 5432"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Sección: Web -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Web y navegador</h2>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Puerto web</label>
+          <input type="text" name="web_port"
+                 value="{{ instance.web_port if is_edit else '8000' }}"
+                 placeholder="8000"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Host web</label>
+          <input type="text" name="web_host"
+                 value="{{ instance.web_host if is_edit else 'localhost' }}"
+                 placeholder="localhost"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Navegador Selenium</label>
+          <input type="text" name="browser"
+                 value="{{ instance.browser if is_edit else 'firefox' }}"
+                 placeholder="firefox | chrome | firefox:4"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Puerto VNC Selenium <span class="text-slate-400 font-normal">(opcional)</span></label>
+          <input type="text" name="selenium_vnc_port"
+                 value="{{ instance.selenium_vnc_port or '' if is_edit else '' }}"
+                 placeholder="Ej: 5900"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Factor de timeout Behat</label>
+          <input type="number" name="timeout_factor" min="1" max="10"
+                 value="{{ instance.timeout_factor if is_edit else 1 }}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Faildump Behat <span class="text-slate-400 font-normal">(opcional)</span></label>
+          <input type="text" name="behat_faildump"
+                 value="{{ instance.behat_faildump or '' if is_edit else '' }}"
+                 placeholder="Ruta local para faildumps"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+
+      </div>
+    </div>
+
+    <!-- Sección: Servicios a arrancar -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Servicios a arrancar</h2>
+        <p class="text-xs text-slate-400 mt-0.5">Webserver y BD siempre se arrancan. El resto es opcional.</p>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-3 gap-3">
+        {% for fname, label, desc, default in [
+          ('start_mail',     'Mailpit (correo)',  'Servidor SMTP + interfaz web', true),
+          ('start_selenium', 'Selenium',          'Necesario para ejecutar Behat', false),
+          ('start_exttests', 'External tests',    'Necesario para tests de ficheros externos', false),
+        ] %}
+        <label class="flex items-start gap-3 cursor-pointer group">
+          <input type="checkbox" name="{{ fname }}" value="1"
+                 {% if is_edit %}{{ 'checked' if instance[fname] else '' }}{% elif default %}checked{% endif %}
+                 class="mt-0.5 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+          <div>
+            <span class="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">{{ label }}</span>
+            <p class="text-xs text-slate-400">{{ desc }}</p>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Sección: Xdebug -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
+         x-data="{ enabled: {{ 'true' if is_edit and instance.xdebug else 'false' }} }">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+        <div>
+          <h2 class="text-sm font-semibold text-slate-700">Xdebug</h2>
+          <p class="text-xs text-slate-400 mt-0.5">Depuración PHP paso a paso.</p>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" name="xdebug" value="1"
+                 x-model="enabled"
+                 {{ 'checked' if is_edit and instance.xdebug else '' }}
+                 class="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+          <span class="text-sm font-medium text-slate-700">Activar</span>
+        </label>
+      </div>
+      <div x-show="enabled" x-cloak class="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">XDEBUG_MODE</label>
+          <input type="text" name="xdebug_mode"
+                 value="{{ instance.xdebug_mode if is_edit else 'develop,debug' }}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Client host</label>
+          <input type="text" name="xdebug_client_host"
+                 value="{{ instance.xdebug_client_host if is_edit else 'host.docker.internal' }}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+        <div>
+          <label class="block text-xs font-medium text-slate-600 mb-1">Puerto</label>
+          <input type="number" name="xdebug_port"
+                 value="{{ instance.xdebug_port if is_edit else 9003 }}"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+        </div>
+      </div>
+    </div>
+
+    <!-- Sección: Servicios opcionales -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Servicios opcionales</h2>
+        <p class="text-xs text-slate-400 mt-0.5">Se activan al marcar la casilla.</p>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-3">
+
+        {% set checks = [
+          ('phpunit_external_services', 'External Services PHPUnit', 'memcached, redis, solr, ldap, mongodb'),
+          ('bbb_mock', 'Mock BigBlueButton', 'Activa el servicio mock de BBB'),
+          ('matrix_mock', 'Mock Matrix', 'Activa el servicio mock de Matrix'),
+          ('mlbackend', 'ML Backend', 'Activa el backend Python de Machine Learning'),
+        ] %}
+        {% for name, label, desc in checks %}
+        <label class="flex items-start gap-3 cursor-pointer group">
+          <input type="checkbox" name="{{ name }}" value="1"
+                 {{ 'checked' if is_edit and instance[name] else '' }}
+                 class="mt-0.5 w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
+          <div>
+            <span class="text-sm font-medium text-slate-700 group-hover:text-indigo-600 transition-colors">{{ label }}</span>
+            <p class="text-xs text-slate-400">{{ desc }}</p>
+          </div>
+        </label>
+        {% endfor %}
+
+      </div>
+    </div>
+
+    <!-- Sección: App móvil -->
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">App móvil <span class="text-slate-400 font-normal">(requiere chrome)</span></h2>
+      </div>
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Ruta local a la app</label>
+          <input type="text" name="app_path"
+                 value="{{ instance.app_path or '' if is_edit else '' }}"
+                 placeholder="/ruta/a/moodleapp"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Para desarrollo local con código fuente.</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">Versión imagen Docker app</label>
+          <input type="text" name="app_version"
+                 value="{{ instance.app_version or '' if is_edit else '' }}"
+                 placeholder="Ej: 4.4.0"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Imagen de Docker Hub (alternativo a ruta local).</p>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-slate-700 mb-1">
+            Versión Node <span class="text-slate-400 font-normal">(solo ruta local)</span>
+          </label>
+          <input type="text" name="app_node_version"
+                 value="{{ instance.app_node_version or '' if is_edit else '' }}"
+                 placeholder="Auto desde .nvmrc (ej: 18.17.0)"
+                 class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent">
+          <p class="text-xs text-slate-400 mt-1">Si está vacío se lee del .nvmrc de la app.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Botones -->
+    <div class="flex items-center justify-between pt-2">
+      <a href="{{ '/instances/' + instance.id if is_edit else '/' }}"
+         class="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-800 transition-colors">
+        Cancelar
+      </a>
+      <button type="submit"
+              class="px-6 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg shadow-sm transition-colors">
+        {{ 'Guardar cambios' if is_edit else 'Crear instancia' }}
+      </button>
+    </div>
+
+  </form>
+</div>
+{% endblock %}

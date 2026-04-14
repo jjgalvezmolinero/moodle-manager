@@ -1,0 +1,20 @@
+services:
+  moodle-manager:
+    build: .
+    container_name: moodle-manager
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+    volumes:
+      # Docker socket — necesario para gestionar contenedores
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Persistencia de instancias configuradas
+      - ./data:/data
+      # Acceso al sistema de archivos del host para leer los repos moodle-docker
+      # y para que docker compose resuelva los paths de los volúmenes.
+      # Ajusta si tus repos están en otro lugar (ej: /opt:/opt o /srv:/srv).
+      - /home:/home
+      # Monta el código en vivo — los cambios en templates y Python se aplican sin rebuild
+      - ./app:/app
+    environment:
+      - DATA_DIR=/data
