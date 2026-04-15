@@ -1,0 +1,55 @@
+<div>
+  <!-- Cabecera con ruta actual y botón subir -->
+  <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+    {% if parent_path is not none %}
+    <button type="button"
+            hx-get="/browse-dir?path={{ parent_path | urlencode }}"
+            hx-target="#dir-browser-content"
+            hx-swap="innerHTML"
+            title="Subir un nivel"
+            class="shrink-0 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors">
+      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 10l7-7m0 0l7 7m-7-7v18"/>
+      </svg>
+    </button>
+    {% endif %}
+    <span class="font-mono text-xs text-slate-600 truncate flex-1" title="{{ current_path }}">
+      {{ current_path }}
+    </span>
+  </div>
+
+  <!-- Lista de subdirectorios -->
+  <div class="overflow-y-auto h-64 p-2 space-y-0.5">
+    {% if dirs %}
+      {% for d in dirs %}
+      <button type="button"
+              hx-get="/browse-dir?path={{ d.path | urlencode }}"
+              hx-target="#dir-browser-content"
+              hx-swap="innerHTML"
+              class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg transition-colors group">
+        <svg class="w-4 h-4 shrink-0 text-amber-400 group-hover:text-amber-500" fill="currentColor" viewBox="0 0 24 24">
+          <path d="M10 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V8a2 2 0 00-2-2h-8l-2-2z"/>
+        </svg>
+        <span class="font-mono truncate">{{ d.name }}</span>
+        <svg class="w-3.5 h-3.5 shrink-0 ml-auto text-slate-300 group-hover:text-indigo-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+        </svg>
+      </button>
+      {% endfor %}
+    {% else %}
+      <p class="text-center text-slate-400 text-sm py-10 italic">Sin subdirectorios</p>
+    {% endif %}
+  </div>
+
+  <!-- Pie con ruta seleccionable -->
+  <div class="flex items-center gap-3 px-4 py-3 bg-slate-50 border-t border-slate-200">
+    <span class="font-mono text-xs text-indigo-700 truncate flex-1" title="{{ current_path }}">
+      {{ current_path }}
+    </span>
+    <button type="button"
+            onclick="document.dispatchEvent(new CustomEvent('dir-picked', {detail:{path:'{{ current_path }}'}, bubbles:true}))"
+            class="shrink-0 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
+      Seleccionar
+    </button>
+  </div>
+</div>

@@ -2,17 +2,19 @@ import os
 import json
 import threading
 import asyncio
-from fastapi import FastAPI, Request, Form, HTTPException, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse
+from fastapi import FastAPI, Request, Form, HTTPException, WebSocket, WebSocketDisconnect, BackgroundTasks
+from fastapi.responses import HTMLResponse, RedirectResponse, JSONResponse, FileResponse
 from fastapi.templating import Jinja2Templates
 from sse_starlette.sse import EventSourceResponse
 from datetime import datetime
 from typing import Optional, Annotated
 
+from urllib.parse import quote as _urlquote
+
 from models import Instance, InstanceStatus, DBType
 import store
 from compose import run_async, stream_logs, active_services
-from docker_ops import get_instance_status, get_instance_containers, exec_in_webserver
+from docker_ops import get_instance_status, get_instance_containers, exec_in_webserver, create_export_archive
 
 app = FastAPI(title="Moodle Manager")
 templates = Jinja2Templates(directory="templates")
@@ -26,6 +28,8 @@ STATUS_LABELS = {
     InstanceStatus.stopped: ("Detenida", "bg-slate-400"),
     InstanceStatus.unknown: ("Desconocido", "bg-gray-300"),
 }
+
+templates.env.filters["urlencode"] = lambda s: _urlquote(str(s), safe="")
 
 templates.env.globals.update({
     "STATUS_LABELS": STATUS_LABELS,
@@ -626,6 +630,67 @@ async def terminal_ws(websocket: WebSocket, instance_id: str, service: str = "we
         exec_sock.close()
     except Exception:
         pass
+
+
+# ── Directory browser ─────────────────────────────────────────────────────────
+
+@app.get("/browse-dir", response_class=HTMLResponse)
+async def browse_dir(request: Request, path: str = "/home"):
+    import pathlib
+    try:
+        p = pathlib.Path(path).resolve()
+    except Exception:
+        p = pathlib.Path("/home")
+
+    if not p.is_dir():
+        p = p.parent if p.parent.is_dir() else pathlib.Path("/home")
+
+    dirs = []
+    try:
+        for entry in sorted(p.iterdir(), key=lambda e: e.name.lower()):
+            if entry.is_dir() and not entry.name.startswith("."):
+                dirs.append({"name": entry.name, "path": str(entry)})
+    except PermissionError:
+        pass
+
+    parent_path = str(p.parent) if p != p.parent else None
+
+    return templates.TemplateResponse("fragments/dir_browser.html", {
+        "request": request,
+        "current_path": str(p),
+        "parent_path": parent_path,
+        "dirs": dirs,
+    })
+
+
+# ── Export ────────────────────────────────────────────────────────────────────
+
+@app.get("/instances/{instance_id}/export")
+async def export_instance(instance_id: str, background_tasks: BackgroundTasks):
+    instance = store.get(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404)
+
+    loop = asyncio.get_event_loop()
+    try:
+        archive_path = await loop.run_in_executor(None, create_export_archive, instance)
+    except RuntimeError as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+    def _cleanup():
+        try:
+            os.remove(archive_path)
+        except OSError:
+            pass
+
+    background_tasks.add_task(_cleanup)
+    filename = f"{instance.compose_project_name}_export.tar.gz"
+    return FileResponse(
+        path=archive_path,
+        media_type="application/gzip",
+        filename=filename,
+        background=background_tasks,
+    )
 
 
 @app.get("/health")
