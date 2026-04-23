@@ -165,7 +165,7 @@ The `/home` directory is also mounted inside the container so that all path chec
 ```
 moodle-manager/
 ├── Dockerfile
-├── docker-compose.yml
+├── compose.yml
 ├── requirements.txt
 ├── data/
 │   ├── instances.json          # Instance persistence (auto-generated)
