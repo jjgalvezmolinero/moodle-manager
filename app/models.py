@@ -21,9 +21,10 @@ class InstanceStatus(StrEnum):
 
 
 class Instance(BaseModel):
+    model_config = {"extra": "ignore"}
+
     id: str = Field(default_factory=lambda: str(uuid.uuid4()))
     name: str
-    moodle_docker_path: str
     compose_project_name: str
     wwwroot: str
     db: DBType

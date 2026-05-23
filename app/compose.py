@@ -6,6 +6,7 @@ from typing import List, AsyncGenerator
 from models import Instance
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
+MOODLE_DOCKER_PATH = os.environ.get("MOODLE_DOCKER_BUNDLED_PATH", "/moodle-docker")
 
 
 def _get_app_runtime(version: str) -> str:
@@ -51,7 +52,7 @@ def active_services(instance: Instance) -> List[str]:
 
 
 def build_compose_files(instance: Instance) -> List[str]:
-    base = instance.moodle_docker_path
+    base = MOODLE_DOCKER_PATH
     files = [
         f"{base}/base.yml",
         f"{base}/service.mail.yml",
@@ -137,7 +138,7 @@ def build_env(instance: Instance) -> dict:
         "MOODLE_DOCKER_BROWSER_NAME": browser_name,
         "MOODLE_DOCKER_BROWSER_TAG": browser_tag,
         "MOODLE_DOCKER_SELENIUM_SUFFIX": "",
-        "ASSETDIR": f"{instance.moodle_docker_path}/assets",
+        "ASSETDIR": f"{MOODLE_DOCKER_PATH}/assets",
     })
 
     if instance.db_version:

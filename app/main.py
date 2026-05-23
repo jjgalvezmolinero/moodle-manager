@@ -13,7 +13,7 @@ from urllib.parse import quote as _urlquote
 
 from models import Instance, InstanceStatus, DBType
 import store
-from compose import run_async, stream_logs, active_services
+from compose import run_async, stream_logs, active_services, MOODLE_DOCKER_PATH
 from docker_ops import get_instance_status, get_instance_containers, exec_in_webserver, create_export_archive
 
 app = FastAPI(title="Moodle Manager")
@@ -45,7 +45,7 @@ def _empty_to_none(value: Optional[str]) -> Optional[str]:
 
 
 def _parse_instance_form(
-    name, moodle_docker_path, compose_project_name, wwwroot, db,
+    name, compose_project_name, wwwroot, db,
     php_version, db_version, web_port, web_host, db_port, browser,
     selenium_vnc_port, phpunit_external_services, bbb_mock, matrix_mock,
     mlbackend, behat_faildump, timeout_factor, app_path, app_version,
@@ -55,7 +55,6 @@ def _parse_instance_form(
 ) -> dict:
     return dict(
         name=name.strip(),
-        moodle_docker_path=moodle_docker_path.strip().rstrip("/"),
         compose_project_name=compose_project_name.strip(),
         wwwroot=wwwroot.strip(),
         db=db,
@@ -127,13 +126,11 @@ async def containers_fragment(request: Request, instance_id: str):
 
 @app.get("/instances/new", response_class=HTMLResponse)
 async def new_form(request: Request):
-    settings = store.get_settings()
     return templates.TemplateResponse("form.html", {
         "request": request,
         "instance": None,
         "php_versions": PHP_VERSIONS,
         "db_types": DB_TYPES,
-        "default_moodle_docker_path": settings.get("moodle_docker_path", ""),
     })
 
 
@@ -141,7 +138,6 @@ async def new_form(request: Request):
 async def create_instance(
     request: Request,
     name: Annotated[str, Form()],
-    moodle_docker_path: Annotated[str, Form()],
     compose_project_name: Annotated[str, Form()],
     wwwroot: Annotated[str, Form()],
     db: Annotated[str, Form()],
@@ -171,7 +167,7 @@ async def create_instance(
     notes: Annotated[Optional[str], Form()] = None,
 ):
     data = _parse_instance_form(
-        name, moodle_docker_path, compose_project_name, wwwroot, db,
+        name, compose_project_name, wwwroot, db,
         php_version, db_version, web_port, web_host, db_port, browser,
         selenium_vnc_port, phpunit_external_services, bbb_mock, matrix_mock,
         mlbackend, behat_faildump, timeout_factor, app_path, app_version,
@@ -202,7 +198,6 @@ async def update_instance(
     request: Request,
     instance_id: str,
     name: Annotated[str, Form()],
-    moodle_docker_path: Annotated[str, Form()],
     compose_project_name: Annotated[str, Form()],
     wwwroot: Annotated[str, Form()],
     db: Annotated[str, Form()],
@@ -235,7 +230,7 @@ async def update_instance(
     if not instance:
         raise HTTPException(status_code=404)
     data = _parse_instance_form(
-        name, moodle_docker_path, compose_project_name, wwwroot, db,
+        name, compose_project_name, wwwroot, db,
         php_version, db_version, web_port, web_host, db_port, browser,
         selenium_vnc_port, phpunit_external_services, bbb_mock, matrix_mock,
         mlbackend, behat_faildump, timeout_factor, app_path, app_version,
@@ -293,7 +288,7 @@ async def compose_up(instance_id: str):
     messages = []
 
     # Copy config.php from moodle-docker template if not present
-    src = os.path.join(instance.moodle_docker_path, "config.docker-template.php")
+    src = os.path.join(MOODLE_DOCKER_PATH, "config.docker-template.php")
     dst = os.path.join(instance.wwwroot, "config.php")
     if os.path.isfile(src) and not os.path.isfile(dst):
         try:
@@ -506,37 +501,11 @@ async def action_disable_xdebug(instance_id: str):
     return JSONResponse({"ok": exit_code == 0, "output": output.strip() or "Xdebug desactivado."})
 
 
-@app.get("/check-path")
-async def check_path(path: str):
-    path = path.strip()
-    if not path:
-        return JSONResponse({"ok": False, "message": "La ruta está vacía."})
-    exists = os.path.isdir(path)
-    # Also verify it looks like a moodle-docker repo
-    is_moodle_docker = exists and os.path.isfile(os.path.join(path, "base.yml"))
-    if not exists:
-        return JSONResponse({"ok": False, "message": f"La carpeta no existe: {path}"})
-    if not is_moodle_docker:
-        return JSONResponse({"ok": False, "message": f"La carpeta existe pero no parece un repo moodle-docker (no se encontró base.yml)."})
-    return JSONResponse({"ok": True, "message": f"Carpeta encontrada y válida."})
-
-
 @app.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request):
-    settings = store.get_settings()
-    return templates.TemplateResponse("settings.html", {"request": request, "settings": settings})
-
-
-@app.post("/settings", response_class=HTMLResponse)
-async def save_settings(
-    request: Request,
-    moodle_docker_path: Annotated[str, Form()] = "",
-):
-    store.save_settings({"moodle_docker_path": moodle_docker_path.strip().rstrip("/")})
     return templates.TemplateResponse("settings.html", {
         "request": request,
-        "settings": store.get_settings(),
-        "saved": True,
+        "moodle_docker_path": MOODLE_DOCKER_PATH,
     })
 
 
