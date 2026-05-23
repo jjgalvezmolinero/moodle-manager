@@ -7,4 +7,4 @@ if [ -n "${MOODLE_DOCKER_BUNDLED_PATH}" ] && [ ! -f "${MOODLE_DOCKER_BUNDLED_PAT
     echo "[moodle-manager] moodle-docker listo."
 fi
 
-exec uvicorn main:app --host 0.0.0.0 --port 9000
+exec uvicorn main:app --host 0.0.0.0 --port 9000 --reload

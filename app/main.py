@@ -1,4 +1,5 @@
 import os
+import re
 import json
 import threading
 import asyncio
@@ -604,7 +605,7 @@ async def terminal_ws(websocket: WebSocket, instance_id: str, service: str = "we
 # ── Directory browser ─────────────────────────────────────────────────────────
 
 @app.get("/browse-dir", response_class=HTMLResponse)
-async def browse_dir(request: Request, path: str = "/home"):
+async def browse_dir(request: Request, path: str = "/home", hx_target: str = "dir-browser-content"):
     import pathlib
     try:
         p = pathlib.Path(path).resolve()
@@ -629,6 +630,7 @@ async def browse_dir(request: Request, path: str = "/home"):
         "current_path": str(p),
         "parent_path": parent_path,
         "dirs": dirs,
+        "hx_target": hx_target,
     })
 
 
@@ -660,6 +662,97 @@ async def export_instance(instance_id: str, background_tasks: BackgroundTasks):
         filename=filename,
         background=background_tasks,
     )
+
+
+# ── Moodle clone ──────────────────────────────────────────────────────────────
+
+_moodle_versions_cache: list | None = None
+
+_FALLBACK_VERSIONS = [
+    "MOODLE_405_STABLE", "MOODLE_404_STABLE", "MOODLE_403_STABLE",
+    "MOODLE_402_STABLE", "MOODLE_401_STABLE", "MOODLE_400_STABLE",
+    "MOODLE_311_STABLE", "MOODLE_310_STABLE",
+]
+
+
+async def _fetch_moodle_versions() -> list:
+    proc = await asyncio.create_subprocess_exec(
+        "git", "ls-remote", "--heads", "https://github.com/moodle/moodle.git",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
+    stdout, _ = await proc.communicate()
+    branches = []
+    for line in stdout.decode().splitlines():
+        m = re.search(r'refs/heads/(MOODLE_(\d)(\d+)_STABLE)$', line)
+        if m:
+            major, minor = int(m.group(2)), int(m.group(3))
+            if major > 3 or (major == 3 and minor >= 9):
+                branches.append((m.group(1), major, minor))
+    branches.sort(key=lambda x: (x[1], x[2]), reverse=True)
+    return [b[0] for b in branches] if branches else _FALLBACK_VERSIONS
+
+
+@app.get("/moodle/versions")
+async def moodle_versions():
+    global _moodle_versions_cache
+    if _moodle_versions_cache is not None:
+        return JSONResponse(_moodle_versions_cache)
+    try:
+        result = await asyncio.wait_for(_fetch_moodle_versions(), timeout=15.0)
+    except Exception:
+        result = _FALLBACK_VERSIONS
+    _moodle_versions_cache = result
+    return JSONResponse(result)
+
+
+@app.get("/moodle/clone")
+async def moodle_clone(request: Request, path: str, branch: str):
+    path = path.strip()
+    branch = branch.strip()
+
+    async def generator():
+        if os.path.exists(path):
+            yield {"data": json.dumps({"ok": False, "error": f"La ruta ya existe: {path}"}), "event": "done"}
+            return
+
+        cmd = [
+            "git", "clone", "--depth=1", "--progress",
+            "--branch", branch,
+            "https://github.com/moodle/moodle.git",
+            path,
+        ]
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.STDOUT,
+            )
+        except Exception as e:
+            yield {"data": json.dumps({"ok": False, "error": str(e)}), "event": "done"}
+            return
+
+        buf = b""
+        async for chunk in proc.stdout:
+            if await request.is_disconnected():
+                proc.kill()
+                return
+            buf += chunk
+            parts = re.split(rb'[\r\n]+', buf)
+            buf = parts[-1]
+            for part in parts[:-1]:
+                text = part.decode("utf-8", errors="replace").strip()
+                if text:
+                    yield {"data": text, "event": "message"}
+
+        if buf.strip():
+            yield {"data": buf.decode("utf-8", errors="replace").strip(), "event": "message"}
+
+        await proc.wait()
+        ok = proc.returncode == 0
+        yield {"data": json.dumps({"ok": ok, "path": path}), "event": "done"}
+
+    return EventSourceResponse(generator())
 
 
 @app.get("/health")

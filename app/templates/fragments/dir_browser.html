@@ -3,8 +3,8 @@
   <div class="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
     {% if parent_path is not none %}
     <button type="button"
-            hx-get="/browse-dir?path={{ parent_path | urlencode }}"
-            hx-target="#dir-browser-content"
+            hx-get="/browse-dir?path={{ parent_path | urlencode }}&hx_target={{ hx_target | urlencode }}"
+            hx-target="#{{ hx_target }}"
             hx-swap="innerHTML"
             title="Subir un nivel"
             class="shrink-0 p-1 text-slate-400 hover:text-slate-700 hover:bg-slate-200 rounded transition-colors">
@@ -23,8 +23,8 @@
     {% if dirs %}
       {% for d in dirs %}
       <button type="button"
-              hx-get="/browse-dir?path={{ d.path | urlencode }}"
-              hx-target="#dir-browser-content"
+              hx-get="/browse-dir?path={{ d.path | urlencode }}&hx_target={{ hx_target | urlencode }}"
+              hx-target="#{{ hx_target }}"
               hx-swap="innerHTML"
               class="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-slate-700 hover:bg-indigo-50 hover:text-indigo-700 rounded-lg transition-colors group">
         <svg class="w-4 h-4 shrink-0 text-amber-400 group-hover:text-amber-500" fill="currentColor" viewBox="0 0 24 24">
