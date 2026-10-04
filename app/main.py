@@ -16,6 +16,7 @@ from models import Instance, InstanceStatus, DBType
 import store
 from compose import run_async, stream_logs, active_services, MOODLE_DOCKER_PATH
 from docker_ops import get_instance_status, get_instance_containers, exec_in_webserver, create_export_archive
+from paths import to_internal, to_host, is_drive_root, join_host, HOST_BROWSE_ROOT, IS_WINDOWS
 
 app = FastAPI(title="Moodle Manager")
 templates = Jinja2Templates(directory="templates")
@@ -35,6 +36,8 @@ templates.env.filters["urlencode"] = lambda s: _urlquote(str(s), safe="")
 templates.env.globals.update({
     "STATUS_LABELS": STATUS_LABELS,
     "InstanceStatus": InstanceStatus,
+    "HOST_BROWSE_ROOT": HOST_BROWSE_ROOT,
+    "IS_WINDOWS": IS_WINDOWS,
     "now": lambda: datetime.now().strftime("%H:%M:%S"),
 })
 
@@ -290,7 +293,7 @@ async def compose_up(instance_id: str):
 
     # Copy config.php from moodle-docker template if not present
     src = os.path.join(MOODLE_DOCKER_PATH, "config.docker-template.php")
-    dst = os.path.join(instance.wwwroot, "config.php")
+    dst = os.path.join(to_internal(instance.wwwroot), "config.php")
     if os.path.isfile(src) and not os.path.isfile(dst):
         try:
             shutil.copy2(src, dst)
@@ -506,7 +509,7 @@ async def action_disable_xdebug(instance_id: str):
 async def settings_page(request: Request):
     return templates.TemplateResponse("settings.html", {
         "request": request,
-        "moodle_docker_path": MOODLE_DOCKER_PATH,
+        "moodle_docker_path": to_host(MOODLE_DOCKER_PATH),
     })
 
 
@@ -605,29 +608,34 @@ async def terminal_ws(websocket: WebSocket, instance_id: str, service: str = "we
 # ── Directory browser ─────────────────────────────────────────────────────────
 
 @app.get("/browse-dir", response_class=HTMLResponse)
-async def browse_dir(request: Request, path: str = "/home", hx_target: str = "dir-browser-content"):
+async def browse_dir(request: Request, path: str = "", hx_target: str = "dir-browser-content"):
     import pathlib
+    root = pathlib.Path(to_internal(HOST_BROWSE_ROOT))
     try:
-        p = pathlib.Path(path).resolve()
+        p = pathlib.Path(to_internal(path.strip() or HOST_BROWSE_ROOT)).resolve()
     except Exception:
-        p = pathlib.Path("/home")
+        p = root
 
     if not p.is_dir():
-        p = p.parent if p.parent.is_dir() else pathlib.Path("/home")
+        p = p.parent if p.parent.is_dir() else root
 
+    # Paths are returned in host form (C:\... on Windows) so the user sees and
+    # stores the paths they know.
+    current_host = to_host(str(p))
     dirs = []
     try:
         for entry in sorted(p.iterdir(), key=lambda e: e.name.lower()):
             if entry.is_dir() and not entry.name.startswith("."):
-                dirs.append({"name": entry.name, "path": str(entry)})
+                dirs.append({"name": entry.name, "path": join_host(current_host, entry.name)})
     except PermissionError:
         pass
 
-    parent_path = str(p.parent) if p != p.parent else None
+    has_parent = p != p.parent and not is_drive_root(str(p))
+    parent_path = to_host(str(p.parent)) if has_parent else None
 
     return templates.TemplateResponse("fragments/dir_browser.html", {
         "request": request,
-        "current_path": str(p),
+        "current_path": current_host,
         "parent_path": parent_path,
         "dirs": dirs,
         "hx_target": hx_target,
@@ -710,9 +718,10 @@ async def moodle_versions():
 async def moodle_clone(request: Request, path: str, branch: str):
     path = path.strip()
     branch = branch.strip()
+    internal_path = to_internal(path)
 
     async def generator():
-        if os.path.exists(path):
+        if os.path.exists(internal_path):
             yield {"data": json.dumps({"ok": False, "error": f"La ruta ya existe: {path}"}), "event": "done"}
             return
 
@@ -720,7 +729,7 @@ async def moodle_clone(request: Request, path: str, branch: str):
             "git", "clone", "--depth=1", "--progress",
             "--branch", branch,
             "https://github.com/moodle/moodle.git",
-            path,
+            internal_path,
         ]
         try:
             proc = await asyncio.create_subprocess_exec(

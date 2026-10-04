@@ -47,7 +47,8 @@
       {{ current_path }}
     </span>
     <button type="button"
-            onclick="document.dispatchEvent(new CustomEvent('dir-picked', {detail:{path:'{{ current_path }}'}, bubbles:true}))"
+            data-path="{{ current_path }}"
+            onclick="document.dispatchEvent(new CustomEvent('dir-picked', {detail:{path:this.dataset.path}, bubbles:true}))"
             class="shrink-0 px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-sm font-medium rounded-lg transition-colors">
       Seleccionar
     </button>

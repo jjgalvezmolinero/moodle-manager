@@ -4,6 +4,7 @@ import platform
 import asyncio
 from typing import List, AsyncGenerator
 from models import Instance
+from paths import to_internal, HOST_OS
 
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 MOODLE_DOCKER_PATH = os.environ.get("MOODLE_DOCKER_BUNDLED_PATH", "/moodle-docker")
@@ -103,7 +104,7 @@ def build_compose_files(instance: Instance) -> List[str]:
     if instance.web_port:
         files.append(f"{base}/webserver.port.yml")
 
-    if platform.system() == "Darwin":
+    if HOST_OS == "darwin" or platform.system() == "Darwin":
         files.append(f"{base}/volumes-cached.yml")
 
     local = f"{base}/local.yml"
@@ -128,7 +129,7 @@ def build_env(instance: Instance) -> dict:
 
     env.update({
         "COMPOSE_PROJECT_NAME": instance.compose_project_name,
-        "MOODLE_DOCKER_WWWROOT": instance.wwwroot,
+        "MOODLE_DOCKER_WWWROOT": to_internal(instance.wwwroot),
         "MOODLE_DOCKER_DB": instance.db,
         "MOODLE_DOCKER_PHP_VERSION": instance.php_version,
         "MOODLE_DOCKER_WEB_HOST": instance.web_host,
@@ -165,9 +166,9 @@ def build_env(instance: Instance) -> dict:
     if instance.mlbackend:
         env["MOODLE_DOCKER_MLBACKEND"] = "true"
     if instance.behat_faildump:
-        env["MOODLE_DOCKER_BEHAT_FAILDUMP"] = instance.behat_faildump
+        env["MOODLE_DOCKER_BEHAT_FAILDUMP"] = to_internal(instance.behat_faildump)
     if instance.app_path:
-        env["MOODLE_DOCKER_APP_PATH"] = instance.app_path
+        env["MOODLE_DOCKER_APP_PATH"] = to_internal(instance.app_path)
     if instance.app_version:
         env["MOODLE_DOCKER_APP_VERSION"] = instance.app_version
 
@@ -176,7 +177,7 @@ def build_env(instance: Instance) -> dict:
         app_version = instance.app_version or ""
         if instance.app_path and not app_version:
             try:
-                pkg = json.load(open(os.path.join(instance.app_path, "package.json")))
+                pkg = json.load(open(os.path.join(to_internal(instance.app_path), "package.json")))
                 app_version = pkg.get("version", "")
             except Exception:
                 pass
@@ -196,7 +197,7 @@ def build_env(instance: Instance) -> dict:
             node_version = instance.app_node_version
             if not node_version:
                 try:
-                    raw = open(os.path.join(instance.app_path, ".nvmrc")).read().strip()
+                    raw = open(os.path.join(to_internal(instance.app_path), ".nvmrc")).read().strip()
                     node_version = raw.lstrip("v").replace("/", "-")
                 except Exception:
                     node_version = "18"

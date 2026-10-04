@@ -1,0 +1,27 @@
+# Override para Windows (Docker Desktop con backend WSL2).
+#
+# No lo uses directamente: ejecuta start-windows.ps1, que genera el .env con
+# MOODLE_DOCKER_BUNDLED_PATH y activa este fichero mediante COMPOSE_FILE.
+#
+# Docker Desktop expone las unidades de Windows a los contenedores Linux en
+# /run/desktop/mnt/host/<unidad>. Montamos C:\Users en esa misma ruta dentro
+# del manager para que las rutas que maneja Python sean exactamente las que
+# entiende el daemon al crear los bind mounts de cada instancia Moodle.
+#
+# Si tus proyectos Moodle están en otra unidad o fuera de C:\Users, añade otra
+# línea siguiendo el mismo patrón, por ejemplo:
+#   - D:/proyectos:/run/desktop/mnt/host/d/proyectos
+services:
+  moodle-manager:
+    volumes: !override
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./data:/data
+      - ./app:/app
+      - C:/Users:/run/desktop/mnt/host/c/Users
+      - ./moodle-docker:${MOODLE_DOCKER_BUNDLED_PATH:?Ejecuta start-windows.ps1 para generar el .env}
+    environment:
+      - HOST_OS=windows
+      - HOST_BROWSE_ROOT=${HOST_BROWSE_ROOT:-C:\Users}
+      # Los bind mounts de Windows no propagan eventos inotify: sin polling
+      # el --reload de uvicorn no detecta cambios en el código.
+      - WATCHFILES_FORCE_POLLING=true

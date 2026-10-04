@@ -24,7 +24,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY app/ ./
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+# Elimina CRLF por si el repo se clonó en Windows con core.autocrlf=true
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 EXPOSE 9000
 

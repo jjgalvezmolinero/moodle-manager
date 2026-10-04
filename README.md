@@ -97,6 +97,22 @@ open http://localhost:9000
 
 Then go to **Settings** and set the path to your moodle-docker clone. After that, create your first instance.
 
+### Windows (Docker Desktop)
+
+Requires Docker Desktop with the **WSL2 backend** (the default).
+
+```powershell
+git clone https://github.com/jjgalvezmolinero/moodle-manager.git
+cd moodle-manager
+powershell -ExecutionPolicy Bypass -File .\start-windows.ps1
+```
+
+The script writes a `.env` file (paths + `COMPOSE_FILE=compose.yml;compose.windows.yml`) and starts the container. After the first run, a plain `docker compose up -d` works as well.
+
+Paths are entered and shown in Windows form (`C:\Users\me\moodle45`). By default only `C:\Users` is mounted into the manager, so your Moodle code must live under it. To use another drive or folder, add a line to the `volumes` section of [compose.windows.yml](compose.windows.yml), e.g. `- D:/projects:/run/desktop/mnt/host/d/projects`.
+
+> Keeping the Moodle code inside the WSL filesystem is faster than on `C:\`, but it is not supported by the folder picker yet.
+
 ---
 
 ## Creating an instance
@@ -158,6 +174,8 @@ The manager mounts the host Docker socket (`/var/run/docker.sock`), allowing it 
 
 The `/home` directory is also mounted inside the container so that all path checks and file operations work correctly against the host filesystem.
 
+On Windows the daemon runs inside the Docker Desktop VM and sees drive `C:` as `/run/desktop/mnt/host/c`. `compose.windows.yml` mounts `C:\Users` at that same path inside the manager, and [app/paths.py](app/paths.py) translates `C:\...` paths to that form before using them, so the same invariant holds: the path Python reads is the path the daemon bind-mounts.
+
 ---
 
 ## Project structure
@@ -193,6 +211,10 @@ moodle-manager/
 | Variable | Default | Description |
 |---|---|---|
 | `DATA_DIR` | `/data` | Directory where `instances.json` is persisted |
+| `MOODLE_DOCKER_BUNDLED_PATH` | `${PWD}/moodle-docker` | moodle-docker path as seen by the host daemon |
+| `HOST_OS` | `linux` | `windows` enables `C:\` path translation (set by `compose.windows.yml`) |
+| `HOST_BROWSE_ROOT` | `/home` (`C:\Users` on Windows) | Folder the folder picker opens by default |
+| `WINDOWS_MOUNT_PREFIX` | `/run/desktop/mnt/host` | Where Docker Desktop exposes Windows drives |
 
 ---
 

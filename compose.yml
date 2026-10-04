@@ -18,4 +18,6 @@ services:
       - ./app:/app
     environment:
       - DATA_DIR=/data
-      - MOODLE_DOCKER_BUNDLED_PATH=${PWD}/moodle-docker
+      # Ruta de moodle-docker tal y como la ve el daemon Docker del host.
+      # En Windows la define start-windows.ps1 en el fichero .env.
+      - MOODLE_DOCKER_BUNDLED_PATH=${MOODLE_DOCKER_BUNDLED_PATH:-${PWD}/moodle-docker}
