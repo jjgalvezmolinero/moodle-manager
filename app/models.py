@@ -40,7 +40,6 @@ class Instance(BaseModel):
     start_selenium: bool = False
     start_exttests: bool = False
     # Xdebug
-    xdebug: bool = False
     xdebug_mode: str = "develop,debug"
     xdebug_client_host: str = "host.docker.internal"
     xdebug_port: int = 9003

@@ -54,7 +54,7 @@ Moodle Manager reads the path to your local moodle-docker clone and dynamically 
 | **Logs** | Live log streaming (SSE) for any service (webserver, db, selenium, mailpit) |
 | **Terminal** | Interactive bash terminal to the webserver container from the browser |
 | **Moodle actions** | Install database, init PHPUnit/Behat, purge caches |
-| **Xdebug** | Install, enable and disable Xdebug for any PHP version (2.x and 3.x handled automatically) |
+| **Xdebug** | One-click ON/OFF toggle; off by default so browsing stays fast (2.x and 3.x handled automatically) |
 | **Containers** | Active containers view with status and mapped ports |
 | **Multi-instance** | Run as many instances as your machine allows, each fully isolated |
 
@@ -134,18 +134,22 @@ All other options (Xdebug, Selenium, PHPUnit external services, BBB mock, Mailpi
 
 ## How Xdebug works
 
-moodle-docker does **not** include Xdebug in its base images. Moodle Manager handles this by providing an **Install Xdebug** action that runs inside the running webserver container:
+Xdebug is **off by default** and is switched on and off with the **Xdebug ON/OFF** button in the instance header. When it is off the extension is not loaded at all, so normal browsing runs at full speed.
 
-1. Updates the PECL channel
-2. Installs the right Xdebug version for your PHP version:
-   - PHP ≥ 8.0 → `xdebug` (3.x latest)
-   - PHP 7.3–7.4 → `xdebug-3.1.6`
-   - PHP 7.0–7.2 → `xdebug-2.9.8`
-   - PHP 5.6 → `xdebug-2.5.5`
-3. Writes the config (mode, client host, port) to the PHP ini file
-4. Restarts Apache
+- **On:** writes `zz-xdebug.ini` (mode, client host and port from the instance settings, `start_with_request = yes`) and reloads Apache. It takes well under a second. Recent `moodlehq/moodle-php-apache` images already ship `xdebug.so`. With older images it is installed from PECL the first time, using the right version for the PHP version:
+  - PHP ≥ 8.0 → `xdebug` (3.x latest)
+  - PHP 7.3–7.4 → `xdebug-3.1.6`
+  - PHP 7.0–7.2 → `xdebug-2.9.8` (`remote_*` config)
+  - PHP 5.6 → `xdebug-2.5.5` (`remote_*` config)
+- **Off:** removes the ini file and reloads Apache.
 
-> **Note:** the installation is lost when the container is destroyed (`down`). It persists across `stop`/`start`.
+> **Note:** the state lives in the container. It survives `stop`/`start`, and after a `down` the new container starts with Xdebug off.
+
+## Performance: `$CFG->debug` in config.php
+
+When `config.php` sets `$CFG->debug`, Moodle treats itself as being in developer mode before the database is available and skips its component cache. It then rescans every plugin directory on each request. On a Windows bind mount that adds about 8 s per page.
+
+New instances get a `config.php` with that line commented out, and the **Instalar BD** action stores `DEBUG_DEVELOPER` in the database instead, so you still see every error. For existing instances, run **Optimizar config.php** in the *Acciones Moodle* tab. After adding new classes or plugins, purge caches.
 
 ---
 
@@ -187,7 +191,7 @@ moodle-manager/
 ├── requirements.txt
 ├── data/
 │   ├── instances.json          # Instance persistence (auto-generated)
-│   └── overrides/              # Generated compose files (xdebug, etc.)
+│   └── overrides/              # Generated compose files (legacy)
 └── app/
     ├── main.py                 # FastAPI routes
     ├── models.py               # Pydantic models

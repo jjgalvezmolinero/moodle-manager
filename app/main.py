@@ -55,7 +55,7 @@ def _parse_instance_form(
     mlbackend, behat_faildump, timeout_factor, app_path, app_version,
     app_node_version, notes,
     start_mail, start_selenium, start_exttests,
-    xdebug, xdebug_mode, xdebug_client_host, xdebug_port,
+    xdebug_mode, xdebug_client_host, xdebug_port,
 ) -> dict:
     return dict(
         name=name.strip(),
@@ -72,7 +72,6 @@ def _parse_instance_form(
         start_mail=start_mail is not None,
         start_selenium=start_selenium is not None,
         start_exttests=start_exttests is not None,
-        xdebug=xdebug is not None,
         xdebug_mode=xdebug_mode.strip() or "develop,debug",
         xdebug_client_host=xdebug_client_host.strip() or "host.docker.internal",
         xdebug_port=int(xdebug_port) if xdebug_port else 9003,
@@ -155,7 +154,6 @@ async def create_instance(
     start_mail: Annotated[Optional[str], Form()] = "1",
     start_selenium: Annotated[Optional[str], Form()] = None,
     start_exttests: Annotated[Optional[str], Form()] = None,
-    xdebug: Annotated[Optional[str], Form()] = None,
     xdebug_mode: Annotated[str, Form()] = "develop,debug",
     xdebug_client_host: Annotated[str, Form()] = "host.docker.internal",
     xdebug_port: Annotated[Optional[str], Form()] = "9003",
@@ -177,7 +175,7 @@ async def create_instance(
         mlbackend, behat_faildump, timeout_factor, app_path, app_version,
         app_node_version, notes,
         start_mail, start_selenium, start_exttests,
-        xdebug, xdebug_mode, xdebug_client_host, xdebug_port,
+        xdebug_mode, xdebug_client_host, xdebug_port,
     )
     instance = Instance(**data)
     store.save(instance)
@@ -215,7 +213,6 @@ async def update_instance(
     start_mail: Annotated[Optional[str], Form()] = "1",
     start_selenium: Annotated[Optional[str], Form()] = None,
     start_exttests: Annotated[Optional[str], Form()] = None,
-    xdebug: Annotated[Optional[str], Form()] = None,
     xdebug_mode: Annotated[str, Form()] = "develop,debug",
     xdebug_client_host: Annotated[str, Form()] = "host.docker.internal",
     xdebug_port: Annotated[Optional[str], Form()] = "9003",
@@ -240,7 +237,7 @@ async def update_instance(
         mlbackend, behat_faildump, timeout_factor, app_path, app_version,
         app_node_version, notes,
         start_mail, start_selenium, start_exttests,
-        xdebug, xdebug_mode, xdebug_client_host, xdebug_port,
+        xdebug_mode, xdebug_client_host, xdebug_port,
     )
     updated = instance.model_copy(update=data)
     store.save(updated)
@@ -282,9 +279,30 @@ async def _compose_action(instance_id: str, *args) -> JSONResponse:
     return JSONResponse({"ok": ok, "output": output.strip()})
 
 
+def _disable_config_debug(content: str) -> str:
+    """Comment out `$CFG->debug = ...` in config.php.
+
+    With debug set in config.php Moodle considers itself in developer mode
+    before the DB is available and skips the component cache, rescanning every
+    plugin directory on each request (~8 s per page on a Windows bind mount).
+    The developer level is stored in the DB instead (see _set_developer_debug).
+    """
+    return re.sub(
+        r"^(\s*)(\$CFG->debug\s*=)",
+        r"\1// Debug se guarda en la BD (Moodle Manager): en config.php desactiva la caché de componentes.\n\1// \2",
+        content,
+        flags=re.MULTILINE,
+    )
+
+
+def _set_developer_debug(instance: Instance) -> tuple[int, str]:
+    """Store DEBUG_DEVELOPER (E_ALL) in the DB. debugdisplay stays in
+    config.php: it does not affect the component cache."""
+    return exec_in_webserver(instance, ["php", "admin/cli/cfg.php", "--name=debug", "--set=32767"])
+
+
 @app.post("/instances/{instance_id}/up")
 async def compose_up(instance_id: str):
-    import shutil
     instance = store.get(instance_id)
     if not instance:
         raise HTTPException(status_code=404)
@@ -296,7 +314,10 @@ async def compose_up(instance_id: str):
     dst = os.path.join(to_internal(instance.wwwroot), "config.php")
     if os.path.isfile(src) and not os.path.isfile(dst):
         try:
-            shutil.copy2(src, dst)
+            with open(src, encoding="utf-8") as f:
+                content = f.read()
+            with open(dst, "w", encoding="utf-8", newline="\n") as f:
+                f.write(_disable_config_debug(content))
             messages.append("config.php copiado desde la plantilla.")
         except Exception as e:
             messages.append(f"Aviso: no se pudo copiar config.php: {e}")
@@ -386,6 +407,9 @@ async def action_install_db(
         f" --agree-license"
     )
     exit_code, output = exec_in_webserver(instance, cmd)
+    if exit_code == 0:
+        dbg_code, dbg_output = _set_developer_debug(instance)
+        output += "\nDebug DEVELOPER activado en la BD." if dbg_code == 0 else f"\nAviso: no se pudo activar el debug: {dbg_output}"
     return JSONResponse({"ok": exit_code == 0, "output": output.strip()})
 
 
@@ -407,6 +431,37 @@ async def action_init_behat(instance_id: str):
     return JSONResponse({"ok": exit_code == 0, "output": output.strip()})
 
 
+@app.post("/instances/{instance_id}/actions/fast-config")
+async def action_fast_config(instance_id: str):
+    """Move the debug setting of an existing config.php to the DB."""
+    instance = store.get(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404)
+    path = os.path.join(to_internal(instance.wwwroot), "config.php")
+    try:
+        with open(path, encoding="utf-8") as f:
+            content = f.read()
+    except OSError as e:
+        return JSONResponse({"ok": False, "output": f"No se pudo leer config.php: {e}"})
+
+    new_content = _disable_config_debug(content)
+    if new_content == content:
+        return JSONResponse({"ok": True, "output": "config.php ya estaba optimizado: no define $CFG->debug."})
+
+    # cfg.php refuses to change a setting defined in config.php, so the line
+    # goes first; if the DB update fails the original file is restored.
+    def _write(text):
+        with open(path, "w", encoding="utf-8", newline="") as f:
+            f.write(text)
+
+    _write(new_content)
+    exit_code, output = await asyncio.to_thread(_set_developer_debug, instance)
+    if exit_code != 0:
+        _write(content)
+        return JSONResponse({"ok": False, "output": f"No se pudo guardar el debug en la BD (¿está instalada?). config.php no se ha modificado.\n{output}"})
+    return JSONResponse({"ok": True, "output": "Debug DEVELOPER guardado en la BD y $CFG->debug comentado en config.php."})
+
+
 @app.post("/instances/{instance_id}/actions/purge-caches")
 async def action_purge_caches(instance_id: str):
     instance = store.get(instance_id)
@@ -418,91 +473,102 @@ async def action_purge_caches(instance_id: str):
 
 # ── Xdebug actions ────────────────────────────────────────────────────────────
 
-def _xdebug_install_cmd(instance) -> str:
-    """Build the bash command to install and configure Xdebug for the instance's PHP version.
+# Xdebug is toggled by creating/removing its ini file and reloading Apache, so
+# when it is off the extension is not loaded at all and costs nothing. Recent
+# moodle-php-apache images already ship xdebug.so; older ones get it via PECL
+# the first time it is enabled. Everything lives in the container, so a `down`
+# leaves the new container with Xdebug off.
+XDEBUG_INI = "/usr/local/etc/php/conf.d/zz-xdebug.ini"
+# Written by earlier versions of the manager (pecl + docker-php-ext-enable).
+XDEBUG_LEGACY_INI = "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
 
-    Compatibility matrix (xdebug.org/docs/compat):
-      PHP >= 8.0       → xdebug (3.x latest)   config: mode / client_host / client_port
-      PHP 7.3, 7.4     → xdebug-3.1.6          config: mode / client_host / client_port
-      PHP 7.0–7.2      → xdebug-2.9.8          config: remote_enable / remote_host / remote_port
-      PHP 5.6          → xdebug-2.5.5          config: remote_enable / remote_host / remote_port
-    """
+_RELOAD_APACHE = "apache2ctl graceful >/dev/null 2>&1"
+_XDEBUG_SO = '"$(php -r \'echo ini_get("extension_dir");\')/xdebug.so"'
+
+
+def _xdebug_pecl_package(php_version: str) -> str:
+    """PECL package compatible with the PHP version (xdebug.org/docs/compat)."""
     try:
-        major, minor = [int(x) for x in instance.php_version.split(".")[:2]]
+        major, minor = [int(x) for x in php_version.split(".")[:2]]
     except ValueError:
         major, minor = 8, 0
-
     if major >= 8:
-        pecl_pkg = "xdebug"
-        config = (
-            f"xdebug.mode = {instance.xdebug_mode}\\n"
-            f"xdebug.client_host = {instance.xdebug_client_host}\\n"
-            f"xdebug.client_port = {instance.xdebug_port}\\n"
-        )
-    elif major == 7 and minor >= 3:
-        pecl_pkg = "xdebug-3.1.6"
-        config = (
-            f"xdebug.mode = {instance.xdebug_mode}\\n"
-            f"xdebug.client_host = {instance.xdebug_client_host}\\n"
-            f"xdebug.client_port = {instance.xdebug_port}\\n"
-        )
-    elif major == 7:  # 7.0, 7.1, 7.2
-        pecl_pkg = "xdebug-2.9.8"
-        config = (
-            f"xdebug.remote_enable = 1\\n"
-            f"xdebug.remote_host = {instance.xdebug_client_host}\\n"
-            f"xdebug.remote_port = {instance.xdebug_port}\\n"
-        )
-    else:  # PHP 5.6
-        pecl_pkg = "xdebug-2.5.5"
-        config = (
-            f"xdebug.remote_enable = 1\\n"
-            f"xdebug.remote_host = {instance.xdebug_client_host}\\n"
-            f"xdebug.remote_port = {instance.xdebug_port}\\n"
-        )
+        return "xdebug"
+    if major == 7 and minor >= 3:
+        return "xdebug-3.1.6"
+    if major == 7:
+        return "xdebug-2.9.8"
+    return "xdebug-2.5.5"
 
-    ini_path = "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
-    return (
-        f"bash -c '"
-        f"pecl channel-update pecl.php.net 2>&1"
-        f" && pecl install {pecl_pkg} 2>&1"
-        f" && docker-php-ext-enable xdebug 2>&1"
-        f" && printf \"{config}\" >> {ini_path}'"
+
+def _xdebug_ini(instance: Instance) -> str:
+    """Ini content for the instance. Debugging starts on every request while
+    Xdebug is on: toggling it from the manager is the trigger."""
+    lines = ["zend_extension=xdebug"]
+    if _xdebug_pecl_package(instance.php_version).startswith("xdebug-2"):
+        lines += [
+            "xdebug.remote_enable = 1",
+            "xdebug.remote_autostart = 1",
+            f"xdebug.remote_host = {instance.xdebug_client_host}",
+            f"xdebug.remote_port = {instance.xdebug_port}",
+        ]
+    else:
+        lines += [
+            f"xdebug.mode = {instance.xdebug_mode}",
+            "xdebug.start_with_request = yes",
+            f"xdebug.client_host = {instance.xdebug_client_host}",
+            f"xdebug.client_port = {instance.xdebug_port}",
+        ]
+    return "\n".join(lines) + "\n"
+
+
+def _xdebug_status(instance: Instance) -> dict:
+    script = f"test -f {_XDEBUG_SO} && echo installed; php -m | grep -qix xdebug && echo enabled; true"
+    exit_code, output = exec_in_webserver(instance, ["sh", "-c", script])
+    if exit_code != 0:
+        return {"running": False, "installed": False, "enabled": False}
+    return {"running": True, "installed": "installed" in output, "enabled": "enabled" in output}
+
+
+@app.get("/instances/{instance_id}/xdebug")
+async def xdebug_status(instance_id: str):
+    instance = store.get(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404)
+    return JSONResponse(await asyncio.to_thread(_xdebug_status, instance))
+
+
+@app.post("/instances/{instance_id}/xdebug/enable")
+async def xdebug_enable(instance_id: str):
+    instance = store.get(instance_id)
+    if not instance:
+        raise HTTPException(status_code=404)
+    pecl_pkg = _xdebug_pecl_package(instance.php_version)
+    script = (
+        f"if [ ! -f {_XDEBUG_SO} ]; then "
+        f"pecl channel-update pecl.php.net && pecl install {pecl_pkg} || exit 1; fi; "
+        f"rm -f {XDEBUG_LEGACY_INI}; "
+        f'printf "%s" "$XDEBUG_INI_CONTENT" > {XDEBUG_INI} && {_RELOAD_APACHE}'
     )
+    exit_code, output = await asyncio.to_thread(
+        exec_in_webserver, instance, ["sh", "-c", script],
+        {"XDEBUG_INI_CONTENT": _xdebug_ini(instance)},
+    )
+    status = await asyncio.to_thread(_xdebug_status, instance)
+    ok = exit_code == 0 and status["enabled"]
+    return JSONResponse({"ok": ok, "output": "" if ok else output.strip(), **status})
 
 
-@app.post("/instances/{instance_id}/actions/install-xdebug")
-async def action_install_xdebug(instance_id: str):
+@app.post("/instances/{instance_id}/xdebug/disable")
+async def xdebug_disable(instance_id: str):
     instance = store.get(instance_id)
     if not instance:
         raise HTTPException(status_code=404)
-    cmd = _xdebug_install_cmd(instance)
-    exit_code, output = exec_in_webserver(instance, cmd)
-    if exit_code == 0:
-        await run_async(instance, "restart", "webserver")
-    return JSONResponse({"ok": exit_code == 0, "output": output.strip()})
-
-
-@app.post("/instances/{instance_id}/actions/enable-xdebug")
-async def action_enable_xdebug(instance_id: str):
-    instance = store.get(instance_id)
-    if not instance:
-        raise HTTPException(status_code=404)
-    ini_path = "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
-    cmd = f"bash -c 'sed -i \"s/^; zend_extension=/zend_extension=/\" {ini_path} && apache2ctl graceful 2>&1'"
-    exit_code, output = exec_in_webserver(instance, cmd)
-    return JSONResponse({"ok": exit_code == 0, "output": output.strip() or "Xdebug activado."})
-
-
-@app.post("/instances/{instance_id}/actions/disable-xdebug")
-async def action_disable_xdebug(instance_id: str):
-    instance = store.get(instance_id)
-    if not instance:
-        raise HTTPException(status_code=404)
-    ini_path = "/usr/local/etc/php/conf.d/docker-php-ext-xdebug.ini"
-    cmd = f"bash -c 'sed -i \"s/^zend_extension=/; zend_extension=/\" {ini_path} && apache2ctl graceful 2>&1'"
-    exit_code, output = exec_in_webserver(instance, cmd)
-    return JSONResponse({"ok": exit_code == 0, "output": output.strip() or "Xdebug desactivado."})
+    script = f"rm -f {XDEBUG_INI} {XDEBUG_LEGACY_INI} && {_RELOAD_APACHE}"
+    exit_code, output = await asyncio.to_thread(exec_in_webserver, instance, ["sh", "-c", script])
+    status = await asyncio.to_thread(_xdebug_status, instance)
+    ok = exit_code == 0 and not status["enabled"]
+    return JSONResponse({"ok": ok, "output": "" if ok else output.strip(), **status})
 
 
 @app.get("/settings", response_class=HTMLResponse)

@@ -74,7 +74,7 @@ def _get_container(instance: Instance, service: str):
     return containers[0] if containers else None
 
 
-def exec_in_webserver(instance: Instance, command: str) -> tuple[int, str]:
+def exec_in_webserver(instance: Instance, command: str | list, environment: dict | None = None) -> tuple[int, str]:
     try:
         client = get_client()
         containers = client.containers.list(filters={
@@ -86,7 +86,7 @@ def exec_in_webserver(instance: Instance, command: str) -> tuple[int, str]:
         if not containers:
             return 1, "El contenedor webserver no está en ejecución."
         container = containers[0]
-        exit_code, output = container.exec_run(command, demux=False)
+        exit_code, output = container.exec_run(command, demux=False, environment=environment)
         decoded = output.decode("utf-8", errors="replace") if output else ""
         return exit_code or 0, decoded
     except Exception as e:

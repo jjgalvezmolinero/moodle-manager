@@ -6,7 +6,6 @@ from typing import List, AsyncGenerator
 from models import Instance
 from paths import to_internal, HOST_OS
 
-DATA_DIR = os.environ.get("DATA_DIR", "/data")
 MOODLE_DOCKER_PATH = os.environ.get("MOODLE_DOCKER_BUNDLED_PATH", "/moodle-docker")
 
 
@@ -21,23 +20,6 @@ def _get_app_runtime(version: str) -> str:
         return "ionic5"
     except (ValueError, IndexError):
         return "ionic7"
-
-
-def _write_xdebug_yml(instance: Instance) -> str:
-    """Generate a compose override file for Xdebug and return its path."""
-    content = (
-        "services:\n"
-        "  webserver:\n"
-        "    environment:\n"
-        f'      XDEBUG_MODE: "{instance.xdebug_mode}"\n'
-        f'      XDEBUG_CONFIG: "client_host={instance.xdebug_client_host} client_port={instance.xdebug_port}"\n'
-    )
-    overrides_dir = os.path.join(DATA_DIR, "overrides")
-    os.makedirs(overrides_dir, exist_ok=True)
-    path = os.path.join(overrides_dir, f"{instance.id}-xdebug.yml")
-    with open(path, "w") as f:
-        f.write(content)
-    return path
 
 
 def active_services(instance: Instance) -> List[str]:
@@ -110,9 +92,6 @@ def build_compose_files(instance: Instance) -> List[str]:
     local = f"{base}/local.yml"
     if os.path.exists(local):
         files.append(local)
-
-    if instance.xdebug:
-        files.append(_write_xdebug_yml(instance))
 
     return files
 

@@ -424,22 +424,15 @@
     </div>
 
     <!-- Sección: Xdebug -->
-    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden"
-         x-data="{ enabled: {{ 'true' if is_edit and instance.xdebug else 'false' }} }">
-      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
-        <div>
-          <h2 class="text-sm font-semibold text-slate-700">Xdebug</h2>
-          <p class="text-xs text-slate-400 mt-0.5">Depuración PHP paso a paso.</p>
-        </div>
-        <label class="flex items-center gap-2 cursor-pointer">
-          <input type="checkbox" name="xdebug" value="1"
-                 x-model="enabled"
-                 {{ 'checked' if is_edit and instance.xdebug else '' }}
-                 class="w-4 h-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500">
-          <span class="text-sm font-medium text-slate-700">Activar</span>
-        </label>
+    <div class="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
+      <div class="px-5 py-3 bg-slate-50 border-b border-slate-200">
+        <h2 class="text-sm font-semibold text-slate-700">Xdebug</h2>
+        <p class="text-xs text-slate-400 mt-0.5">
+          Configuración que se aplica al activar Xdebug desde la página de la instancia.
+          Desactivado no se carga y no ralentiza la navegación.
+        </p>
       </div>
-      <div x-show="enabled" x-cloak class="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
+      <div class="p-5 grid grid-cols-1 sm:grid-cols-3 gap-4">
         <div>
           <label class="block text-xs font-medium text-slate-600 mb-1">XDEBUG_MODE</label>
           <input type="text" name="xdebug_mode"

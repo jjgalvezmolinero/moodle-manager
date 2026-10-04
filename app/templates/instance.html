@@ -24,6 +24,41 @@ document.addEventListener('alpine:init', () => {
     // Actions
     actionLoading: '',
 
+    // Xdebug
+    xdebug: { loaded: false, running: false, installed: false, enabled: false },
+    xdebugBusy: false,
+
+    init() {
+      this.refreshXdebug();
+    },
+
+    async refreshXdebug() {
+      try {
+        const resp = await fetch('/instances/' + this.instanceId + '/xdebug');
+        this.xdebug = { ...(await resp.json()), loaded: true };
+      } catch (e) {
+        this.xdebug = { loaded: true, running: false, installed: false, enabled: false };
+      }
+    },
+
+    async toggleXdebug() {
+      if (this.xdebugBusy || !this.xdebug.running) return;
+      const action = this.xdebug.enabled ? 'disable' : 'enable';
+      this.xdebugBusy = true;
+      try {
+        const resp = await fetch('/instances/' + this.instanceId + '/xdebug/' + action, { method: 'POST' });
+        const data = await resp.json();
+        this.xdebug = { loaded: true, running: data.running, installed: data.installed, enabled: data.enabled };
+        if (data.ok) {
+          window.dispatchEvent(new CustomEvent('show-toast', { detail: { ok: true, message: data.enabled ? 'Xdebug activado' : 'Xdebug desactivado' } }));
+        } else {
+          window.dispatchEvent(new CustomEvent('open-output', { detail: { ok: false, output: data.output || 'No se pudo cambiar Xdebug.' } }));
+        }
+      } finally {
+        this.xdebugBusy = false;
+      }
+    },
+
     startLogs() {
       if (this.logSource) this.logSource.close();
       this.logLines = [];
@@ -106,6 +141,7 @@ document.addEventListener('alpine:init', () => {
         handleApiResponse(resp, successMsg);
       } finally {
         this.actionLoading = '';
+        this.refreshXdebug();
       }
     },
 
@@ -185,6 +221,23 @@ document.addEventListener('alpine:init', () => {
         Destruir
       </button>
       <div class="w-px h-8 bg-slate-200 mx-1"></div>
+      <!-- Xdebug toggle -->
+      <button @click="toggleXdebug()"
+              :disabled="xdebugBusy || !xdebug.running"
+              :title="!xdebug.running ? 'Arranca la instancia para usar Xdebug'
+                     : (xdebug.enabled ? 'Xdebug activo ({{ instance.xdebug_mode }} → {{ instance.xdebug_client_host }}:{{ instance.xdebug_port }}). Pulsa para desactivarlo.'
+                     : 'Xdebug desactivado: la navegación va a máxima velocidad. Pulsa para activarlo.')"
+              :class="xdebug.enabled ? 'bg-indigo-600 hover:bg-indigo-500 text-white border-indigo-600' : 'bg-white hover:bg-slate-50 text-slate-600 border-slate-300'"
+              class="inline-flex items-center gap-2 px-3 py-2 border text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+        <svg x-show="xdebugBusy" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"/>
+        </svg>
+        <span x-show="!xdebugBusy" class="w-2 h-2 rounded-full"
+              :class="xdebug.enabled ? 'bg-green-300' : 'bg-slate-300'"></span>
+        <span x-text="xdebugBusy ? (xdebug.enabled ? 'Desactivando…' : (xdebug.installed ? 'Activando…' : 'Instalando…'))
+                     : ('Xdebug ' + (xdebug.enabled ? 'ON' : 'OFF'))">Xdebug</span>
+      </button>
       <a href="/instances/{{ instance.id }}/export"
          title="Exportar (BD + moodledata)"
          class="inline-flex items-center gap-1.5 px-3 py-2 bg-slate-600 hover:bg-slate-500 text-white text-sm font-medium rounded-lg transition-colors">
@@ -297,53 +350,23 @@ document.addEventListener('alpine:init', () => {
   <div x-show="activeTab === 'actions'" x-cloak>
     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-      <!-- Xdebug -->
-      {% if instance.xdebug %}
-      <div class="md:col-span-2 bg-white rounded-xl border border-indigo-200 shadow-sm p-5">
-        <div class="flex items-center gap-2 mb-1">
-          <span class="inline-block w-2 h-2 rounded-full bg-indigo-500"></span>
-          <h3 class="text-sm font-semibold text-slate-800">Xdebug</h3>
+      <!-- Navegación rápida -->
+      <div class="md:col-span-2 bg-white rounded-xl border border-amber-200 shadow-sm p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+        <div class="flex-1">
+          <h3 class="text-sm font-semibold text-slate-800 mb-1">Navegación rápida</h3>
+          <p class="text-xs text-slate-400">
+            Si <code class="bg-slate-100 px-1 rounded">config.php</code> define <code class="bg-slate-100 px-1 rounded">$CFG->debug</code>,
+            Moodle no usa su caché de componentes y recorre todos los plugins en cada petición (varios segundos por página, sobre todo en Windows).
+            Esta acción guarda el debug DEVELOPER en la BD y comenta esa línea: sigues viendo todos los errores.
+            Tras crear clases o plugins nuevos, purga cachés.
+          </p>
         </div>
-        <p class="text-xs text-slate-400 mb-1">
-          La extensión <strong>no viene instalada</strong> en la imagen base de moodle-docker.
-          Instálala una vez por ciclo de vida del contenedor (se pierde al hacer <em>down</em>).
-        </p>
-        <p class="text-xs text-slate-400 mb-4">
-          {% set php_parts = instance.php_version.split('.') %}
-          {% set php_major = php_parts[0] | int %}
-          {% set php_minor = php_parts[1] | int if php_parts | length > 1 else 0 %}
-          {% if php_major >= 8 %}
-            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug (3.x)</code> —
-          {% elif php_major == 7 and php_minor >= 3 %}
-            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-3.1.6</code> —
-          {% elif php_major == 7 %}
-            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-2.9.8</code> (config <em>remote_*</em>) —
-          {% else %}
-            Versión a instalar: <code class="bg-slate-100 px-1 rounded">xdebug-2.5.5</code> (config <em>remote_*</em>) —
-          {% endif %}
-          Modo: <code class="bg-slate-100 px-1 rounded">{{ instance.xdebug_mode }}</code> —
-          Host: <code class="bg-slate-100 px-1 rounded">{{ instance.xdebug_client_host }}:{{ instance.xdebug_port }}</code>
-        </p>
-        <div class="flex flex-wrap gap-2">
-          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/install-xdebug', 'Xdebug instalado y activado')"
-                  :disabled="actionLoading !== ''"
-                  class="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            Instalar Xdebug
-            <span class="text-indigo-200 text-xs ml-1">(~2 min)</span>
-          </button>
-          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/enable-xdebug', 'Xdebug activado')"
-                  :disabled="actionLoading !== ''"
-                  class="px-4 py-2 bg-green-600 hover:bg-green-500 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            Activar
-          </button>
-          <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/disable-xdebug', 'Xdebug desactivado')"
-                  :disabled="actionLoading !== ''"
-                  class="px-4 py-2 bg-slate-500 hover:bg-slate-400 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
-            Desactivar
-          </button>
-        </div>
+        <button @click="doMoodleAction('/instances/{{ instance.id }}/actions/fast-config', 'config.php optimizado')"
+                :disabled="actionLoading !== ''"
+                class="shrink-0 px-4 py-2 bg-amber-500 hover:bg-amber-400 disabled:opacity-50 text-white text-sm font-medium rounded-lg transition-colors">
+          Optimizar config.php
+        </button>
       </div>
-      {% endif %}
 
 
       <div class="bg-white rounded-xl border border-slate-200 shadow-sm p-5">
@@ -450,7 +473,7 @@ document.addEventListener('alpine:init', () => {
           ('MOODLE_DOCKER_WEB_HOST', instance.web_host),
           ('MOODLE_DOCKER_DB_PORT', instance.db_port or '(no expuesto)'),
           ('MOODLE_DOCKER_BROWSER', instance.browser),
-          ('Xdebug', 'Sí (' + instance.xdebug_mode + ')' if instance.xdebug else 'No'),
+          ('Xdebug (al activarlo)', instance.xdebug_mode + ' → ' + instance.xdebug_client_host + ':' + instance.xdebug_port|string),
           ('External services', 'Sí' if instance.phpunit_external_services else 'No'),
           ('Creada', instance.created_at[:19].replace('T', ' ')),
           ('Modificada', instance.updated_at[:19].replace('T', ' ')),
